@@ -1582,7 +1582,7 @@ function Invoke-PasswordSprayOWA{
 
     .PARAMETER Password
 
-        A single password to attempt a password spray with or a list of usernames 1 per line to to attempt to password spray against..
+        A single password to attempt a password spray with or a list of paasword 1 per line to to attempt to password spray against..
 
     .PARAMETER Threads
        
