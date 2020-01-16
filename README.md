@@ -77,7 +77,7 @@ Get-GlobalAddressList -ExchHostname mail.domain.com -UserName domain\username -P
 ```PowerShell
 Get-MailboxFolders -Mailbox current-user@domain.com
 ```
-**Invoke-PasswordSprayOWA** is a module that will attempt to connect to an Outlook Web Access portal and perform a password spraying attack using a userlist and a single password. PLEASE BE CAREFUL NOT TO LOCKOUT ACCOUNTS!
+**Invoke-PasswordSprayOWA** is a module that will attempt to connect to an Outlook Web Access portal and perform a password spraying attack using a userlist and a single password. PLEASE BE CAREFUL NOT TO LOCKOUT ACCOUNTS! This now supports word list, Lockout wait time, and number of attempts before waiting.
 ```PowerShell
 Invoke-PasswordSprayOWA -ExchHostname mail.domain.com -UserList .\userlist.txt -Password Fall2016 -Threads 15 -OutFile owa-sprayed-creds.txt
 ```
