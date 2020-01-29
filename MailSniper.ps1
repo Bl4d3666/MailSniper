@@ -1604,8 +1604,7 @@ function Invoke-PasswordSprayOWA{
     
     .PARAMETER Status
 
-        Display the current user that the password spray is attempting.
-
+        Display the current user is attempting to password spray.
   
   .EXAMPLE
 
