@@ -101,4 +101,3 @@ Invoke-OpenInboxFinder -EmailList email-list.txt
 ```PowerShell
 Get-ADUsernameFromEWS -EmailList email-list.txt
 ```
-
