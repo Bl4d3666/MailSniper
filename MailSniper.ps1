@@ -2042,10 +2042,10 @@ Param(
 
                       $O365Request = Invoke-WebRequest -Uri "$uri/common/login" -Headers $headers -Method POST -Body $PostDataStage -MaximumRedirection 0 -WebSession $session 
 
-                      #if ($Status -eq 'Y')
-                      #    {
+                      if ($Status -eq 'Y')
+                          {
                               write-host "`t Current User:$Username Current Password:$password"
-                      #    }
+                          }
 
                         $SetCookieString = $O365Request.Headers["Set-Cookie"]
                         $CookieArray = $SetCookieString.Split(";").Trim()
