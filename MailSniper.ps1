@@ -1936,7 +1936,7 @@ function Invoke-PasswordSpray365{
 
 .EXAMPLE
 
-  C:\PS> Invoke-PasswordSprayOWA -ExchHostname mail.domain.com -UserList .\userlist.txt -Password Fall2016 -Threads 15 -OutFile owa-sprayed-creds.txt
+  C:\PS> Invoke-PasswordSpray365 -UserList user.txt -Password password -Status Y -OutFile  owa-sprayed-creds.txt
 
   Description
   -----------
