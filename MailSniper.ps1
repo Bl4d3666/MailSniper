@@ -1859,7 +1859,7 @@ function Read-MsftLoginTokens {
   $htmlResp = $streamReader.ReadToEnd()
 
 
-  if ($stream -eq $null)
+  if ($null -eq $stream)
   {
       Write-Error "Could not retrieve value of tokens. This indicates that the HTML structure of the document has changed. Open an issue report on Github!"
       return $results
@@ -1884,6 +1884,14 @@ function Read-MsftLoginTokens {
       $ctxRequestToken = [regex]::Match($htmlResp,'.*(\"sCtx.*),\"iProductIcon.*').captures.groups[1].value
       $ctxToken = $ctxRequestToken | %{$_.split('"')[3]}
       $results.ctx = $ctxToken
+
+      $originalRequestRequestToken = [regex]::Match($htmlResp,'.*(\"apiCanary.*),\"canary.*').captures.groups[1].value
+      $originalRequestToken = $originalRequestRequestToken | %{$_.split('"')[3]}
+      $results.originalRequest = $originalRequestToken
+
+      $apiCanaryRequestToken = [regex]::Match($htmlResp,'.*(\"apiCanary.*),\"canary.*').captures.groups[1].value
+      $apiCanaryToken = $apiCanaryRequestToken | %{$_.split('"')[3]}
+      $results.apiCanary = $apiCanaryToken
 
       return $results
   }
@@ -2129,6 +2137,208 @@ Param(
   }
 }
 
+function Invoke-UserEnumeration365{
+
+  <#
+    .SYNOPSIS
+  
+      This module will Enumeration users against 365 Outlook Web Access portal.
+  
+      MailSniper Function: Invoke-UserEnumeration365
+      Author: Michael 
+      License: BSD 3-Clause
+      Required Dependencies: None
+      Optional Dependencies: None
+  
+      .DESCRIPTION
+  
+          This module will enumeration users against 365 Outlook Web Access portal.
+  
+      .PARAMETER OutFile
+  
+          Outputs the results to a text file.
+  
+      .PARAMETER UserList
+  
+          List of usernames 1 per line to to attempt to password spray against.
+  
+      .PARAMETER Threads
+         
+          Number of password spraying threads to run.
+      
+      
+      .PARAMETER Domain
+  
+          Specify an Domain.
+      
+      .PARAMETER Status
+  
+          Display the current user that the password spray is attempting.
+  
+    .EXAMPLE
+  
+      C:\PS> Invoke-UserEnumeration365 -UserList .\userlist.txt -Domain exmaple.com -Threads 15 -OutFile owa-users.txt
+  
+      Description
+      -----------
+      This command will connect to the Office 365 Outlook Web Access and attempt to enumeration usernames with 15 threads and write to a file called owa-users.txt.
+  
+  #>
+  Param(
+      [Parameter(Position = 0, Mandatory = $False)][string]$OutFile = "",
+      [Parameter(Position = 1, Mandatory = $False)][string]$Userlist = "",
+      [Parameter(Position = 2, Mandatory = $False)][string]$Domain = "",
+      [Parameter(Position = 3, Mandatory = $False)][string]$Threads = "5",
+      [Parameter(Position = 4, Mandatory = $False)][ValidateSet("Y","N")][String]$Status = "Y"
+  ) 
+  
+      Write-Host -ForegroundColor "yellow" "[*] Now enumeration usernames against Office 365 OWA portal"
+      $currenttime = Get-Date
+      Write-Host -ForegroundColor "yellow" "[*] Current date and time: $currenttime"
+  
+      if ($UserList -eq "")
+          {
+              Write-Error "Invalid number of arguments given. Require -Userlist"
+          }
+  
+      if ($Domain -eq "")
+      {
+          Write-Error "Invalid number of arguments given. Require -Domain"
+      }
+  
+      $Usernames = Get-Content $UserList
+      $count = $Usernames.count
+      $userlists = @{}
+      $count = 0 
+      $FailedCount = 0
+   
+      # Populate the Email
+      $Usernames | ForEach-Object {$userlists[$count % $Threads] += @($_);$count++}
+  
+      $uri = "https://login.microsoftonline.com"
+      $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
+      $headers.Add("Host", "login.microsoftonline.com")
+      $headers.Add("Origin", "https://login.microsoftonline.com")
+      $headers.Add("Upgrade-Insecure-Requests", "1")
+      $headers.Add("Content-Type", "application/x-www-form-urlencoded")
+      $headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:72.0) Gecko/20100101 Firefox/72.0")
+      $headers.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+      $headers.Add("Accept-Encoding", "gzip, deflate")
+      $headers.Add("Accept-Language", "en-US,en;q=0.5")
+      
+      write-Host -ForegroundColor Red "[*] Enumeration usernames"
+  
+      0..($Threads - 1) | % {
+          
+      $Tokens = Read-MsftLoginTokens
+     
+          # Loops through users in the list sequentially
+              Start-Job -ScriptBlock {
+                  
+                  $Domain = $args[1]
+                  $uri = $args[2]
+                  $headers = $args[3]
+                  $Tokens = $args[4]
+                  $Status = $args[5]
+  
+                  $Flowtoken = $Tokens.flowtoken 
+                  $APICanary = $Tokens.APICanary 
+                  $Referer = $Tokens.Referer
+                  $originalRequest = $Token.originalRequest
+                  $headers.Add("Referer", $Referer) 
+                  $headers.Add("canary", $APICanary) 
+                                    
+                  foreach ($Username in $args[0]) 
+                      {
+                          #Enumeration users in Office 365 portal
+                          
+                          if ($Status -eq 'Y')
+                          {
+                              write-host "`t Current User: $Username"
+                          }
+  
+                          $User = $Username+'@'+$Domain
+  
+                          $SessionData = Invoke-WebRequest -Uri $Tokens.Referer -SessionVariable session -Method POST 
+                          $PostDataStage = @{
+                              username = $User
+                              isOtherIdpSupported = "false"
+                              checkPhones = "false" 
+                              isRemoteNGCSupported = "true"
+                              isCookieBannerShown = "false" 
+                              isFidoSupported = "true"
+                              originalRequest = $originalRequest
+                              country = "AU"
+                              forceotclogin = "false"
+                              isExternalFederationDisallowed = "false"
+                              isRemoteConnectSupported = "false"
+                              federationFlags = "0"
+                              isSignup  = "false"
+                              flowToken = $Flowtoken
+                              isAccessPassSupported = "true"
+                          } | ConvertTo-Json
+  
+                          $O365Request = Invoke-WebRequest -Uri "$uri/common/GetCredentialType?mkt=en-US" -Headers $headers -Method POST -Body $PostDataStage -MaximumRedirection 0 -WebSession $session 
+                          $O365Requestjson = $O365Request | ConvertFrom-Json 
+                          $IfExistsResult = $O365Requestjson | Where-Object { $_.IfExistsResult -eq "0" }
+  
+                          if ($null -ne $IfExistsResult)
+                                  {
+                                      Write-Output "[*] SUCCESS! User: $User found"
+                                  }
+                        }
+      
+                      $curr_user+=1
+                      
+              } -ArgumentList $userlists[$_], $Domain, $uri, $headers, $Tokens, $Status | Out-Null
+      }
+      
+      $Complete = Get-Date
+      $MaxWaitAtEnd = 10000
+      $SleepTimer = 200
+      $FullResults = @()
+      While($(Get-Job -State Running).Count -gt 0)
+          {
+              $RunningJobs = ""
+              ForEach($Job in $(Get-Job -State Running))
+                  {
+                      $RunningJobs += ", $($Job.name)"
+                  }       
+  
+              $RunningJobs = $RunningJobs.Substring(2)
+              Write-Progress -Activity "Spraying password $Password..." -Status "$($(Get-Job -State Running).Count) threads remaining" -PercentComplete ($(Get-Job -State Completed).Count / $(Get-Job).Count * 100)
+              if($(New-TimeSpan $Complete $(Get-Date)).TotalSeconds -ge $MaxWaitAtEnd)
+                  {
+                      Write-Host -ForegroundColor "red" "Time expired. Killing remaining jobs..."
+                      Get-Job -State Running | Remove-Job -Force
+                  }
+              else
+              {
+                  Start-Sleep -Milliseconds $SleepTimer
+                  ForEach($Job in Get-Job)
+                  {
+                      $JobOutput = Receive-Job $Job
+                      if ($JobOutput)
+                      {
+                          Write-Host -ForegroundColor "green" $JobOutput
+                          $FullResults += $JobOutput                   
+                          if ($OutFile -ne "")
+                              {
+                                  Write-Verbose "Writing results to $OutFile"
+                                  $FullResults | Out-File -Encoding ascii -Append $OutFile
+                              } 
+                      }
+                  }
+              }
+          }      
+  
+      if ($OutFile -ne "")
+      {
+          $FoundedCreds = Get-Content $OutFile | Measure-Object
+          Write-Host ("[*] A total of " + $FoundedCreds.Count + " credentials were obtained.")
+          Write-Output "Results have been written to $OutFile."
+      }
+  }
 function Invoke-PasswordSprayEWS{
 
 <#
@@ -2184,7 +2394,6 @@ function Invoke-PasswordSprayEWS{
 
 #>
   Param(
-
 
     [Parameter(Position = 0, Mandatory = $false)]
     [system.URI]
