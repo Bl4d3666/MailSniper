@@ -2192,7 +2192,7 @@ function Invoke-UserEnumeration365{
       [Parameter(Position = 4, Mandatory = $False)][ValidateSet("Y","N")][String]$Status = "Y"
   ) 
   
-      Write-Host -ForegroundColor "yellow" "[*] Now enumeration usernames against Office 365 OWA portal"
+      Write-Host -ForegroundColor "yellow" "[*] Now searching for usernames against Office 365 OWA portal"
       $currenttime = Get-Date
       Write-Host -ForegroundColor "yellow" "[*] Current date and time: $currenttime"
   
