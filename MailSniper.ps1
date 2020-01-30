@@ -2335,7 +2335,7 @@ function Invoke-UserEnumeration365{
       if ($OutFile -ne "")
       {
           $FoundedCreds = Get-Content $OutFile | Measure-Object
-          Write-Host ("[*] A total of " + $FoundedCreds.Count + " credentials were obtained.")
+          Write-Host ("[*] A total of " + $FoundedCreds.Count + " user(s) was enumerated.")
           Write-Output "Results have been written to $OutFile."
       }
   }
